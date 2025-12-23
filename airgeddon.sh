@@ -11164,17 +11164,37 @@ function generate_fake_bssid() {
 
 	debug_print
 
+	local original_bssid="${1}"
+	local avoid_bssid="${2}"
 	local digit_to_change
 	local orig_digit
-	digit_to_change="${1:10:1}"
+	local different_mac_digit
+	local candidate_bssid
+	local avoid_bssid_upper=""
+
+	if [ -z "${avoid_bssid}" ] && [ -n "${secondary_bssid}" ]; then
+		avoid_bssid="${secondary_bssid}"
+	fi
+
+	if [ -n "${avoid_bssid}" ]; then
+		avoid_bssid_upper="${avoid_bssid^^}"
+	fi
+
+	digit_to_change="${original_bssid:10:1}"
 	orig_digit=$((16#${digit_to_change}))
 
 	while true; do
 		((different_mac_digit=(orig_digit + 1 + RANDOM % 15) % 16))
-		[[ "${different_mac_digit}" -ne "${orig_digit}" ]] && break
-	done
+		[[ "${different_mac_digit}" -ne "${orig_digit}" ]] || continue
 
-	printf %s%X%s\\n "${1::10}" "${different_mac_digit}" "${1:11}"
+		candidate_bssid=$(printf %s%X%s "${original_bssid::10}" "${different_mac_digit}" "${original_bssid:11}")
+		if [ -n "${avoid_bssid_upper}" ] && [ "${candidate_bssid^^}" = "${avoid_bssid_upper}" ]; then
+			continue
+		fi
+
+		printf '%s\n' "${candidate_bssid}"
+		return
+	done
 }
 
 #Add an invisible char (Zero Width Space - ZWSP) to the original given essid
