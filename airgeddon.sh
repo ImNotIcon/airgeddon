@@ -11281,13 +11281,17 @@ function launch_fake_ap() {
 			"et_sniffing"|"et_sniffing_sslstrip2_beef")
 				hostapd_scr_window_position=${g3_topleft_window}
 			;;
-			"et_captive_portal")
-				if [ "${et_dos_attack}" = "Deauther" ]; then
+		"et_captive_portal")
+			if [ "${et_dos_attack}" = "Deauther" ]; then
+				if [ -n "${secondary_bssid}" ]; then
 					hostapd_scr_window_position=${g6_left1}
 				else
 					hostapd_scr_window_position=${g3_topleft_window}
 				fi
-			;;
+			else
+				hostapd_scr_window_position=${g3_topleft_window}
+			fi
+		;;
 			"et_sniffing_sslstrip2")
 				hostapd_scr_window_position=${g4_topleft_window}
 			;;
@@ -11543,13 +11547,17 @@ function launch_dhcp_server() {
 		"et_sniffing"|"et_sniffing_sslstrip2_beef")
 			dchcpd_scr_window_position=${g3_middleleft_window}
 		;;
-		"et_captive_portal")
-			if [ "${et_dos_attack}" = "Deauther" ]; then
+	"et_captive_portal")
+		if [ "${et_dos_attack}" = "Deauther" ]; then
+			if [ -n "${secondary_bssid}" ]; then
 				dchcpd_scr_window_position=${g6_left2}
 			else
 				dchcpd_scr_window_position=${g3_middleleft_window}
 			fi
-		;;
+		else
+			dchcpd_scr_window_position=${g3_middleleft_window}
+		fi
+	;;
 		"et_sniffing_sslstrip2")
 			dchcpd_scr_window_position=${g4_middleleft_window}
 		;;
@@ -11574,10 +11582,6 @@ function exec_et_deauth() {
 	debug_print
 
 	if [ "${et_dos_attack}" = "Deauther" ]; then
-		if [ -z "${secondary_bssid}" ]; then
-			return
-		fi
-
 		deauther_stopfile="${tmpdir}deauther_stop_${airgeddon_instance_name}.txt"
 		rm -rf "${deauther_stopfile}" > /dev/null 2>&1
 		local deauther_primary_iface="${deauther_primary_interface}"
@@ -11593,18 +11597,25 @@ function exec_et_deauth() {
 			fi
 		fi
 
-		if [ -z "${deauther_primary_iface}" ] || [ -z "${deauther_secondary_iface}" ]; then
+		if [ -z "${deauther_primary_iface}" ]; then
+			return
+		fi
+		if [ -n "${secondary_bssid}" ] && [ -z "${deauther_secondary_iface}" ]; then
 			return
 		fi
 
 		deauther_primary_cmd="deauther -bssid ${bssid} -i ${deauther_primary_iface} -stopfile ${deauther_stopfile}"
-		deauther_secondary_cmd="deauther -bssid ${secondary_bssid} -i ${deauther_secondary_iface} -stopfile ${deauther_stopfile}"
 		deauther_primary_window_name="Deauther (Primary)"
 		deauther_secondary_window_name="Deauther (Secondary)"
 
 		recalculate_windows_sizes
-		deauther_primary_window_position=${g6_left3}
-		deauther_secondary_window_position=${g6_left4}
+		if [ -n "${secondary_bssid}" ]; then
+			deauther_primary_window_position=${g6_left3}
+			deauther_secondary_window_position=${g6_left4}
+		else
+			deauther_primary_window_position=${g3_bottomleft_window}
+			deauther_secondary_window_position=""
+		fi
 
 		manage_output "+j -bg \"#000000\" -fg \"#FF6A00\" -geometry ${deauther_primary_window_position} -T \"${deauther_primary_window_name}\" -xrm \"XTerm*allowTitleOps: false\"" "${deauther_primary_cmd}" "${deauther_primary_window_name}"
 		if [ "${AIRGEDDON_WINDOWS_HANDLING}" = "xterm" ]; then
@@ -11619,17 +11630,20 @@ function exec_et_deauth() {
 			global_process_pid=""
 		fi
 
-		manage_output "+j -bg \"#000000\" -fg \"#FFC266\" -geometry ${deauther_secondary_window_position} -T \"${deauther_secondary_window_name}\" -xrm \"XTerm*allowTitleOps: false\"" "${deauther_secondary_cmd}" "${deauther_secondary_window_name}"
-		if [ "${AIRGEDDON_WINDOWS_HANDLING}" = "xterm" ]; then
-			et_processes+=($!)
-		else
-			get_tmux_process_id "${deauther_secondary_cmd}"
-			et_processes+=("${global_process_pid}")
-			if [[ "${deauther_secondary_window_name}" != *:* ]]; then
-				tmux set-window-option -t "${session_name}:${deauther_secondary_window_name}" allow-rename off > /dev/null 2>&1
-				tmux set-window-option -t "${session_name}:${deauther_secondary_window_name}" automatic-rename off > /dev/null 2>&1
+		if [ -n "${secondary_bssid}" ]; then
+			deauther_secondary_cmd="deauther -bssid ${secondary_bssid} -i ${deauther_secondary_iface} -stopfile ${deauther_stopfile}"
+			manage_output "+j -bg \"#000000\" -fg \"#FFC266\" -geometry ${deauther_secondary_window_position} -T \"${deauther_secondary_window_name}\" -xrm \"XTerm*allowTitleOps: false\"" "${deauther_secondary_cmd}" "${deauther_secondary_window_name}"
+			if [ "${AIRGEDDON_WINDOWS_HANDLING}" = "xterm" ]; then
+				et_processes+=($!)
+			else
+				get_tmux_process_id "${deauther_secondary_cmd}"
+				et_processes+=("${global_process_pid}")
+				if [[ "${deauther_secondary_window_name}" != *:* ]]; then
+					tmux set-window-option -t "${session_name}:${deauther_secondary_window_name}" allow-rename off > /dev/null 2>&1
+					tmux set-window-option -t "${session_name}:${deauther_secondary_window_name}" automatic-rename off > /dev/null 2>&1
+				fi
+				global_process_pid=""
 			fi
-			global_process_pid=""
 		fi
 
 		sleep 1
@@ -13707,6 +13721,36 @@ function kill_pid_and_children_recursive() {
 	kill "${parent_pid}" &> /dev/null
 	wait "${parent_pid}" 2> /dev/null
 	}
+
+#Gracefully stop deauther processes on exit/interrupt
+function stop_deauther_on_exit() {
+
+	debug_print
+
+	local pid=""
+	local process_cmd_line=""
+
+	if [ -n "${deauther_stopfile}" ]; then
+		: > "${deauther_stopfile}" 2> /dev/null
+	fi
+
+	if [ -n "${processidattack}" ]; then
+		process_cmd_line=$(ps -p "${processidattack}" -o args= 2> /dev/null)
+		if [[ "${process_cmd_line}" =~ (^|[[:space:]])([^[:space:]]*/)?deauther(\.sh)?([[:space:]]|$) ]]; then
+			kill_pid_and_children_recursive "${processidattack}"
+		fi
+	fi
+
+	for pid in "${et_processes[@]}"; do
+		if [ -z "${pid}" ]; then
+			continue
+		fi
+		process_cmd_line=$(ps -p "${pid}" -o args= 2> /dev/null)
+		if [[ "${process_cmd_line}" =~ (^|[[:space:]])([^[:space:]]*/)?deauther(\.sh)?([[:space:]]|$) ]]; then
+			kill_pid_and_children_recursive "${pid}"
+		fi
+	done
+}
 
 #Kill the WPA3 downgrade attack processes
 function kill_wpa3_downgrade_attack_processes() {
@@ -16470,16 +16514,10 @@ function et_dos_menu() {
 						return
 					fi
 
-					if [ -z "${secondary_bssid}" ]; then
-						echo
-						language_strings "${language}" 808 "red"
-						language_strings "${language}" 115 "read"
-					else
-						if ! select_deauther_interfaces; then
-							return
-						fi
-						et_prerequisites
+					if ! select_deauther_interfaces; then
+						return
 					fi
+					et_prerequisites
 				fi
 			fi
 		;;
@@ -16718,6 +16756,7 @@ function capture_traps() {
 	if [ "${FUNCNAME[1]}" != "check_language_strings" ]; then
 		case "${1}" in
 			INT|SIGTSTP)
+				stop_deauther_on_exit
 				case ${current_menu} in
 					"pre_main_menu"|"select_interface_menu")
 						exit_code=1
@@ -16786,6 +16825,7 @@ function exit_script_option() {
 	debug_print
 
 	action_on_exit_taken=0
+	stop_deauther_on_exit
 	echo
 	language_strings "${language}" 106 "title"
 	language_strings "${language}" 11 "blue"
@@ -16861,6 +16901,7 @@ function hardcore_exit() {
 	debug_print
 
 	exit_code=2
+	stop_deauther_on_exit
 	if [ "${ifacemode}" = "Monitor" ]; then
 		${airmon} stop "${interface}" > /dev/null 2>&1
 		ifacemode="Managed"
