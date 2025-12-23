@@ -77,6 +77,7 @@ optional_tools_names=(
 						"hostapd-mana"
 						"hcxhash2cap"
 						"hcxhashtool"
+						"deauther"
 					)
 
 update_tools=("curl")
@@ -122,6 +123,7 @@ declare -A possible_package_names=(
 									[${optional_tools_names[28]}]="hostapd-mana" #hostapd-mana
 									[${optional_tools_names[29]}]="hcxtools" #hcxhash2cap
 									[${optional_tools_names[30]}]="hcxtools" #hcxhashtool
+									[${optional_tools_names[31]}]="deauther" #deauther
 									[${update_tools[0]}]="curl" #curl
 								)
 
@@ -314,6 +316,13 @@ currentpassfile="ag.et_currentpass.txt"
 et_successfile="ag.et_success.txt"
 enterprise_successfile="ag.enterprise_success.txt"
 et_processesfile="ag.et_processes.txt"
+deauther_primary_interface=""
+deauther_secondary_interface=""
+deauther_stopfile=""
+secondary_bssid=""
+secondary_essid=""
+secondary_channel=""
+secondary_enc=""
 asleap_pot_tmp="ag.asleap_tmp.txt"
 channelfile="ag.et_channel.txt"
 customportals_php_as_cgi=1
@@ -3010,6 +3019,104 @@ function select_secondary_interface() {
 		done
 		return 0
 	fi
+}
+
+#Deauther interface selection menu (primary/secondary)
+function select_deauther_interface() {
+
+	debug_print
+
+	local interface_role="${1}"
+	shift
+	local deauther_ifaces=("$@")
+	local option_counter=0
+	local selected_iface=""
+	local prompt_id=""
+
+	clear
+	current_menu="et_dos_menu"
+	language_strings "${language}" 265 "title"
+	print_iface_selected
+	print_et_target_vars
+	print_iface_internet_selected
+	echo
+	language_strings "${language}" 47 "green"
+	print_simple_separator
+	if [ "${interface_role}" = "primary" ]; then
+		prompt_id=809
+	else
+		prompt_id=810
+	fi
+	language_strings "${language}" "${prompt_id}" "green"
+	print_simple_separator
+
+	for item in "${deauther_ifaces[@]}"; do
+		option_counter=$((option_counter + 1))
+		if [ ${#option_counter} -eq 1 ]; then
+			spaceiface="  "
+		else
+			spaceiface=" "
+		fi
+		echo -ne "${option_counter}.${spaceiface}${item} "
+		set_chipset "${item}"
+		if [ -z "${chipset}" ]; then
+			language_strings "${language}" 245 "blue"
+		else
+			if [ "${is_rtl_language}" -eq 1 ]; then
+				echo -e "${blue_color}// ${normal_color}${chipset} ${yellow_color}:Chipset${normal_color}"
+			else
+				echo -e "${blue_color}// ${yellow_color}Chipset:${normal_color} ${chipset}"
+			fi
+		fi
+	done
+
+	print_hint
+	read -rp "> " selected_iface
+	while [[ ! ${selected_iface} =~ ^[[:digit:]]+$ ]] || ((selected_iface < 1 || selected_iface > option_counter)); do
+		echo
+		language_strings "${language}" 72 "red"
+		read -rp "> " selected_iface
+	done
+
+	option_counter=0
+	for item in "${deauther_ifaces[@]}"; do
+		option_counter=$((option_counter + 1))
+		if [ "${selected_iface}" = "${option_counter}" ]; then
+			selected_iface="${item}"
+			break
+		fi
+	done
+
+	if [ "${interface_role}" = "primary" ]; then
+		deauther_primary_interface="${selected_iface}"
+	else
+		deauther_secondary_interface="${selected_iface}"
+	fi
+}
+
+function select_deauther_interfaces() {
+
+	debug_print
+
+	local deauther_ifaces=()
+
+	readarray -t deauther_ifaces < <(iw dev | awk '/Interface/ {print $2}')
+	if [ ${#deauther_ifaces[@]} -eq 0 ]; then
+		echo
+		language_strings "${language}" 814 "red"
+		language_strings "${language}" 115 "read"
+		return 1
+	fi
+
+	select_deauther_interface "primary" "${deauther_ifaces[@]}"
+
+	if [ -n "${secondary_bssid}" ]; then
+		select_deauther_interface "secondary" "${deauther_ifaces[@]}"
+	else
+		deauther_secondary_interface=""
+	fi
+
+	return 0
 }
 
 #Interface selection menu
@@ -6050,6 +6157,15 @@ function print_et_target_vars() {
 
 	debug_print
 
+	if [ "${et_dos_attack}" = "Deauther" ]; then
+		if [ -n "${deauther_primary_interface}" ]; then
+			language_strings "${language}" 812 "blue"
+		fi
+		if [ -n "${deauther_secondary_interface}" ]; then
+			language_strings "${language}" 813 "blue"
+		fi
+	fi
+
 	if [ -n "${bssid}" ]; then
 		language_strings "${language}" 43 "blue"
 	else
@@ -6070,6 +6186,10 @@ function print_et_target_vars() {
 		fi
 	else
 		language_strings "${language}" 274 "blue"
+	fi
+
+	if [ -n "${secondary_bssid}" ]; then
+		language_strings "${language}" 807 "blue"
 	fi
 
 	if [ "${current_menu}" != "et_dos_menu" ]; then
@@ -6261,6 +6381,7 @@ function initialize_menu_options_dependencies() {
 	et_sniffing_dependencies=("${optional_tools_names[5]}" "${optional_tools_names[6]}" "${optional_tools_names[7]}" "${optional_tools_names[8]}" "${optional_tools_names[9]}")
 	et_sniffing_sslstrip2_dependencies=("${optional_tools_names[5]}" "${optional_tools_names[6]}" "${optional_tools_names[7]}" "${optional_tools_names[16]}")
 	et_captive_portal_dependencies=("${optional_tools_names[5]}" "${optional_tools_names[6]}" "${optional_tools_names[7]}" "${optional_tools_names[10]}" "${optional_tools_names[11]}")
+	deauther_attack_dependencies=("${optional_tools_names[31]}")
 	wash_scan_dependencies=("${optional_tools_names[12]}")
 	reaver_attacks_dependencies=("${optional_tools_names[13]}")
 	bully_attacks_dependencies=("${optional_tools_names[14]}")
@@ -6391,6 +6512,13 @@ function initialize_menu_and_print_selections() {
 			et_mode=""
 			et_processes=()
 			secondary_wifi_interface=""
+			secondary_bssid=""
+			secondary_essid=""
+			secondary_channel=""
+			secondary_enc=""
+			deauther_primary_interface=""
+			deauther_secondary_interface=""
+			deauther_stopfile=""
 			et_attack_adapter_prerequisites_ok=0
 			advanced_captive_portal=0
 			print_iface_selected
@@ -6580,6 +6708,7 @@ function clean_tmpfiles() {
 		rm -rf "${tmpdir}${dnsmasq_file}" > /dev/null 2>&1
 		rm -rf "${tmpdir}${control_et_file}" > /dev/null 2>&1
 		rm -rf "${tmpdir}${control_enterprise_file}" > /dev/null 2>&1
+		rm -rf "${tmpdir}deauther_stop_"* > /dev/null 2>&1
 		rm -rf "${tmpdir}parsed_file" > /dev/null 2>&1
 		rm -rf "${tmpdir}${ettercap_file}"* > /dev/null 2>&1
 		rm -rf "${tmpdir}${bettercap_file}"* > /dev/null 2>&1
@@ -7377,7 +7506,12 @@ function evil_twin_attacks_menu() {
 						ports_needed["udp"]="${dhcp_port}"
 						if check_busy_ports; then
 							et_mode="et_onlyap"
-							et_dos_menu
+							echo
+							language_strings "${language}" 316 "yellow"
+							language_strings "${language}" 115 "read"
+							if explore_for_targets_option "WPA"; then
+								et_dos_menu
+							fi
 						fi
 					fi
 				else
@@ -7409,7 +7543,12 @@ function evil_twin_attacks_menu() {
 						ports_needed["udp"]="${dhcp_port}"
 						if check_busy_ports; then
 							et_mode="et_sniffing"
-							et_dos_menu
+							echo
+							language_strings "${language}" 316 "yellow"
+							language_strings "${language}" 115 "read"
+							if explore_for_targets_option "WPA"; then
+								et_dos_menu
+							fi
 						fi
 					fi
 				else
@@ -7447,7 +7586,12 @@ function evil_twin_attacks_menu() {
 							ports_needed["udp"]="${dhcp_port} ${bettercap_dns_port}"
 							if check_busy_ports; then
 								et_mode="et_sniffing_sslstrip2"
-								et_dos_menu
+								echo
+								language_strings "${language}" 316 "yellow"
+								language_strings "${language}" 115 "read"
+								if explore_for_targets_option "WPA"; then
+									et_dos_menu
+								fi
 							fi
 						fi
 					fi
@@ -7483,13 +7627,7 @@ function evil_twin_attacks_menu() {
 						ports_needed["udp"]="${dns_port} ${dhcp_port}"
 						if check_busy_ports; then
 							et_mode="et_captive_portal"
-							echo
-							language_strings "${language}" 316 "yellow"
-							language_strings "${language}" 115 "read"
-
-							if explore_for_targets_option "WPA"; then
-								et_dos_menu
-							fi
+							et_dos_menu
 						fi
 					fi
 				else
@@ -7581,7 +7719,12 @@ function beef_pre_menu() {
 						if check_busy_ports; then
 
 							et_mode="et_sniffing_sslstrip2_beef"
-							et_dos_menu
+							echo
+							language_strings "${language}" 316 "yellow"
+							language_strings "${language}" 115 "read"
+							if explore_for_targets_option "WPA"; then
+								et_dos_menu
+							fi
 						fi
 					fi
 				else
@@ -11115,8 +11258,15 @@ function launch_fake_ap() {
 			"et_onlyap")
 				hostapd_scr_window_position=${g1_topleft_window}
 			;;
-			"et_sniffing"|"et_captive_portal"|"et_sniffing_sslstrip2_beef")
+			"et_sniffing"|"et_sniffing_sslstrip2_beef")
 				hostapd_scr_window_position=${g3_topleft_window}
+			;;
+			"et_captive_portal")
+				if [ "${et_dos_attack}" = "Deauther" ]; then
+					hostapd_scr_window_position=${g6_left1}
+				else
+					hostapd_scr_window_position=${g3_topleft_window}
+				fi
 			;;
 			"et_sniffing_sslstrip2")
 				hostapd_scr_window_position=${g4_topleft_window}
@@ -11370,8 +11520,15 @@ function launch_dhcp_server() {
 		"et_onlyap")
 			dchcpd_scr_window_position=${g1_bottomleft_window}
 		;;
-		"et_sniffing"|"et_captive_portal"|"et_sniffing_sslstrip2_beef")
+		"et_sniffing"|"et_sniffing_sslstrip2_beef")
 			dchcpd_scr_window_position=${g3_middleleft_window}
+		;;
+		"et_captive_portal")
+			if [ "${et_dos_attack}" = "Deauther" ]; then
+				dchcpd_scr_window_position=${g6_left2}
+			else
+				dchcpd_scr_window_position=${g3_middleleft_window}
+			fi
 		;;
 		"et_sniffing_sslstrip2")
 			dchcpd_scr_window_position=${g4_middleleft_window}
@@ -11395,6 +11552,69 @@ function launch_dhcp_server() {
 function exec_et_deauth() {
 
 	debug_print
+
+	if [ "${et_dos_attack}" = "Deauther" ]; then
+		if [ -z "${secondary_bssid}" ]; then
+			return
+		fi
+
+		deauther_stopfile="${tmpdir}deauther_stop_${airgeddon_instance_name}.txt"
+		rm -rf "${deauther_stopfile}" > /dev/null 2>&1
+		local deauther_primary_iface="${deauther_primary_interface}"
+		local deauther_secondary_iface="${deauther_secondary_interface}"
+
+		if [ "${deauther_primary_interface}" = "${interface}" ] || [ "${deauther_secondary_interface}" = "${interface}" ]; then
+			prepare_et_monitor
+			if [ "${deauther_primary_interface}" = "${interface}" ]; then
+				deauther_primary_iface="${iface_monitor_et_deauth}"
+			fi
+			if [ "${deauther_secondary_interface}" = "${interface}" ]; then
+				deauther_secondary_iface="${iface_monitor_et_deauth}"
+			fi
+		fi
+
+		if [ -z "${deauther_primary_iface}" ] || [ -z "${deauther_secondary_iface}" ]; then
+			return
+		fi
+
+		deauther_primary_cmd="deauther -bssid ${bssid} -i ${deauther_primary_iface} -stopfile ${deauther_stopfile}"
+		deauther_secondary_cmd="deauther -bssid ${secondary_bssid} -i ${deauther_secondary_iface} -stopfile ${deauther_stopfile}"
+		deauther_primary_window_name="Deauther (Primary)"
+		deauther_secondary_window_name="Deauther (Secondary)"
+
+		recalculate_windows_sizes
+		deauther_primary_window_position=${g6_left3}
+		deauther_secondary_window_position=${g6_left4}
+
+		manage_output "+j -bg \"#000000\" -fg \"#FF6A00\" -geometry ${deauther_primary_window_position} -T \"${deauther_primary_window_name}\" -xrm \"XTerm*allowTitleOps: false\"" "${deauther_primary_cmd}" "${deauther_primary_window_name}"
+		if [ "${AIRGEDDON_WINDOWS_HANDLING}" = "xterm" ]; then
+			et_processes+=($!)
+		else
+			get_tmux_process_id "${deauther_primary_cmd}"
+			et_processes+=("${global_process_pid}")
+			if [[ "${deauther_primary_window_name}" != *:* ]]; then
+				tmux set-window-option -t "${session_name}:${deauther_primary_window_name}" allow-rename off > /dev/null 2>&1
+				tmux set-window-option -t "${session_name}:${deauther_primary_window_name}" automatic-rename off > /dev/null 2>&1
+			fi
+			global_process_pid=""
+		fi
+
+		manage_output "+j -bg \"#000000\" -fg \"#FFC266\" -geometry ${deauther_secondary_window_position} -T \"${deauther_secondary_window_name}\" -xrm \"XTerm*allowTitleOps: false\"" "${deauther_secondary_cmd}" "${deauther_secondary_window_name}"
+		if [ "${AIRGEDDON_WINDOWS_HANDLING}" = "xterm" ]; then
+			et_processes+=($!)
+		else
+			get_tmux_process_id "${deauther_secondary_cmd}"
+			et_processes+=("${global_process_pid}")
+			if [[ "${deauther_secondary_window_name}" != *:* ]]; then
+				tmux set-window-option -t "${session_name}:${deauther_secondary_window_name}" allow-rename off > /dev/null 2>&1
+				tmux set-window-option -t "${session_name}:${deauther_secondary_window_name}" automatic-rename off > /dev/null 2>&1
+			fi
+			global_process_pid=""
+		fi
+
+		sleep 1
+		return
+	fi
 
 	prepare_et_monitor
 
@@ -12191,8 +12411,28 @@ function set_et_control_script() {
 
 			local parent_pid=""
 			local child_pids=""
+			local process_cmd_line=""
 
 			parent_pid="\${1}"
+			if [ -z "\${parent_pid}" ]; then
+				return
+			fi
+
+			process_cmd_line=\$(ps -p "\${parent_pid}" -o args= 2> /dev/null)
+			if [[ "\${process_cmd_line}" =~ (^|[[:space:]])([^[:space:]]*/)?deauther(\.sh)?([[:space:]]|$) ]]; then
+				local stopfile=""
+				if [[ "\${process_cmd_line}" =~ -stopfile[[:space:]]+([^[:space:]]+) ]]; then
+					stopfile="\${BASH_REMATCH[1]}"
+					: > "\${stopfile}" 2> /dev/null
+				else
+					kill -SIGINT "\${parent_pid}" &> /dev/null
+				fi
+				while kill -0 "\${parent_pid}" 2> /dev/null; do
+					sleep 0.2
+				done
+				return
+			fi
+
 			child_pids=\$(pgrep -P "\${parent_pid}" 2> /dev/null)
 
 			for child_pid in \${child_pids}; do
@@ -12450,7 +12690,13 @@ function launch_dns_blackhole() {
 	echo -e "no-hosts"
 	} >> "${tmpdir}${dnsmasq_file}"
 
-	manage_output "+j -bg \"#000000\" -fg \"#0000FF\" -geometry ${g4_middleright_window} -T \"DNS\"" "${optional_tools_names[11]} -C \"${tmpdir}${dnsmasq_file}\"" "DNS"
+	if [ "${et_dos_attack}" = "Deauther" ]; then
+		dnsmasq_window_position=${g6_right2}
+	else
+		dnsmasq_window_position=${g4_middleright_window}
+	fi
+
+	manage_output "+j -bg \"#000000\" -fg \"#0000FF\" -geometry ${dnsmasq_window_position} -T \"DNS\"" "${optional_tools_names[11]} -C \"${tmpdir}${dnsmasq_file}\"" "DNS"
 	if [ "${AIRGEDDON_WINDOWS_HANDLING}" = "xterm" ]; then
 		et_processes+=($!)
 	else
@@ -12490,7 +12736,11 @@ function launch_et_control_window() {
 			control_scr_window_position=${g3_topright_window}
 		;;
 		"et_captive_portal")
-			control_scr_window_position=${g4_topright_window}
+			if [ "${et_dos_attack}" = "Deauther" ]; then
+				control_scr_window_position=${g6_right1}
+			else
+				control_scr_window_position=${g4_topright_window}
+			fi
 		;;
 		"et_sniffing_sslstrip2")
 			control_scr_window_position=${g3_topright_window}
@@ -12525,6 +12775,10 @@ function set_webserver_config() {
 	echo -e "\"mod_redirect\","
 	echo -e "\"mod_accesslog\""
 	echo -e ")\n"
+	echo -e "\$HTTP[\"host\"] =~ \"(hicloud\\\\.com|huawei\\\\.com)\" {"
+	echo -e "url.redirect = ( \"^/generate_204(_.*)?$\" => \"http://${et_ip_router}/\" )"
+	echo -e "url.redirect-code = 302"
+	echo -e "}\n"
 	echo -e "\$HTTP[\"host\"] =~ \"(.*)\" {"
 	echo -e "url.redirect = ( \"^/index.htm$\" => \"/\")"
 	echo -e "url.redirect-code = 302"
@@ -12866,7 +13120,11 @@ function launch_webserver() {
 	debug_print
 
 	recalculate_windows_sizes
-	lighttpd_window_position=${g4_bottomright_window}
+	if [ "${et_dos_attack}" = "Deauther" ]; then
+		lighttpd_window_position=${g6_right3}
+	else
+		lighttpd_window_position=${g4_bottomright_window}
+	fi
 	manage_output "+j -bg \"#000000\" -fg \"#FFFF00\" -geometry ${lighttpd_window_position} -T \"Webserver\"" "lighttpd -D -f \"${tmpdir}${webserver_file}\"" "Webserver"
 	if [ "${AIRGEDDON_WINDOWS_HANDLING}" = "xterm" ]; then
 		et_processes+=($!)
@@ -13389,14 +13647,34 @@ function write_et_processes() {
 }
 
 #Kill a given PID and all its subprocesses recursively
-	function kill_pid_and_children_recursive() {
+function kill_pid_and_children_recursive() {
 
 	debug_print
 
 	local parent_pid=""
 	local child_pids=""
+	local process_cmd_line=""
 
 	parent_pid="${1}"
+	if [ -z "${parent_pid}" ]; then
+		return
+	fi
+
+	process_cmd_line=$(ps -p "${parent_pid}" -o args= 2> /dev/null)
+	if [[ "${process_cmd_line}" =~ (^|[[:space:]])([^[:space:]]*/)?deauther(\.sh)?([[:space:]]|$) ]]; then
+		local stopfile=""
+		if [[ "${process_cmd_line}" =~ -stopfile[[:space:]]+([^[:space:]]+) ]]; then
+			stopfile="${BASH_REMATCH[1]}"
+			: > "${stopfile}" 2> /dev/null
+		else
+			kill -SIGINT "${parent_pid}" &> /dev/null
+		fi
+		while kill -0 "${parent_pid}" 2> /dev/null; do
+			sleep 0.2
+		done
+		return
+	fi
+
 	child_pids=$(pgrep -P "${parent_pid}" 2> /dev/null)
 
 	for child_pid in ${child_pids}; do
@@ -13803,13 +14081,47 @@ function capture_handshake_evil_twin() {
 			fi
 			sleeptimeattack=16
 		;;
+		"Deauther")
+			recalculate_windows_sizes
+			deauther_attack_window_name="Deauther attack"
+			local deauther_handshake_interface
+			if [ -n "${deauther_primary_interface}" ]; then
+				deauther_handshake_interface="${deauther_primary_interface}"
+			else
+				deauther_handshake_interface="${interface}"
+			fi
+			if [ -z "${deauther_stopfile}" ]; then
+				deauther_stopfile="${tmpdir}deauther_stop_${airgeddon_instance_name}.txt"
+			fi
+			rm -rf "${deauther_stopfile}" > /dev/null 2>&1
+			manage_output "+j -bg \"#000000\" -fg \"#FF8C00\" -geometry ${g1_bottomleft_window} -T \"${deauther_attack_window_name}\" -xrm \"XTerm*allowTitleOps: false\"" "deauther -bssid ${bssid} -i ${deauther_handshake_interface} -stopfile ${deauther_stopfile}" "${deauther_attack_window_name}"
+			if [ "${AIRGEDDON_WINDOWS_HANDLING}" = "tmux" ]; then
+				get_tmux_process_id "deauther -bssid ${bssid} -i ${deauther_handshake_interface} -stopfile ${deauther_stopfile}"
+				processidattack="${global_process_pid}"
+				if [[ "${deauther_attack_window_name}" != *:* ]]; then
+					tmux set-window-option -t "${session_name}:${deauther_attack_window_name}" allow-rename off > /dev/null 2>&1
+					tmux set-window-option -t "${session_name}:${deauther_attack_window_name}" automatic-rename off > /dev/null 2>&1
+				fi
+				global_process_pid=""
+			fi
+			sleeptimeattack=12
+		;;
 	esac
 
 	if [ "${AIRGEDDON_WINDOWS_HANDLING}" = "xterm" ]; then
 		processidattack=$!
-		sleep "${sleeptimeattack}" && kill "${processidattack}" &> /dev/null
+		if [ "${et_dos_attack}" = "Deauther" ]; then
+			sleep "${sleeptimeattack}" && kill_pid_and_children_recursive "${processidattack}" &> /dev/null
+		else
+			sleep "${sleeptimeattack}" && kill "${processidattack}" &> /dev/null
+		fi
 	else
-		sleep "${sleeptimeattack}" && kill "${processidattack}" && kill_tmux_windows "Capturing Handshake" &> /dev/null
+		if [ "${et_dos_attack}" = "Deauther" ]; then
+			sleep "${sleeptimeattack}" && kill_pid_and_children_recursive "${processidattack}" &> /dev/null
+		else
+			sleep "${sleeptimeattack}" && kill "${processidattack}" &> /dev/null
+		fi
+		kill_tmux_windows "Capturing Handshake" &> /dev/null
 	fi
 
 	handshake_capture_check
@@ -14999,6 +15311,7 @@ function launch_pmkid_capture() {
 function explore_for_targets_option() {
 
 	debug_print
+	local select_secondary="${3}"
 
 	echo
 	language_strings "${language}" 103 "title"
@@ -15164,7 +15477,7 @@ function explore_for_targets_option() {
 	fi
 
 	sort -t "," -d -k 3 "${tmpdir}nws.txt" > "${tmpdir}wnws.txt"
-	select_target
+	select_target "${select_secondary}"
 }
 
 #Manage target exploration only for Access Points with WPS activated. Parse output files and print menu with results
@@ -15382,6 +15695,8 @@ function explore_for_wps_targets_option() {
 function select_target() {
 
 	debug_print
+	local select_secondary="${1}"
+	local secondary_target_network=""
 
 	clear
 	language_strings "${language}" 104 "title"
@@ -15475,6 +15790,10 @@ function select_target() {
 	channel=${channels[${selected_target_network}]}
 	bssid=${macs[${selected_target_network}]}
 	enc=${encs[${selected_target_network}]}
+	secondary_bssid=""
+	secondary_essid=""
+	secondary_channel=""
+	secondary_enc=""
 
 	if [[ "${types[${selected_target_network}]}" =~ MGT ]] || [[ "${types[${selected_target_network}]}" =~ CMAC && ! "${types[${selected_target_network}]}" =~ PSK ]]; then
 		enterprise_network_selected=1
@@ -15485,6 +15804,32 @@ function select_target() {
 	fi
 
 	set_personal_enterprise_text
+
+	if [ "${select_secondary}" = "secondary" ]; then
+		echo
+		ask_yesno 804 "yes"
+		if [ "${yesno}" = "y" ] && [ "${i}" -gt 1 ]; then
+			language_strings "${language}" 805 "green"
+			read -rp "> " secondary_target_network
+
+			while [[ ! ${secondary_target_network} =~ ^[[:digit:]]+$ ]] || ((secondary_target_network < 1 || secondary_target_network > i)) || [[ "${secondary_target_network}" -eq "${selected_target_network}" ]]; do
+				echo
+				if [[ ${secondary_target_network} =~ ^[[:digit:]]+$ ]] && [[ "${secondary_target_network}" -eq "${selected_target_network}" ]]; then
+					language_strings "${language}" 811 "red"
+				else
+					language_strings "${language}" 72 "red"
+				fi
+				echo
+				language_strings "${language}" 805 "green"
+				read -rp "> " secondary_target_network
+			done
+
+			secondary_essid=${network_names[${secondary_target_network}]}
+			secondary_channel=${channels[${secondary_target_network}]}
+			secondary_bssid=${macs[${secondary_target_network}]}
+			secondary_enc=${encs[${secondary_target_network}]}
+		fi
+	fi
 }
 
 #Perform a test to determine if fcs parameter is needed on wash scanning
@@ -15976,6 +16321,9 @@ function et_dos_menu() {
 	language_strings "${language}" 139 mdk_attack_dependencies[@]
 	language_strings "${language}" 140 aireplay_attack_dependencies[@]
 	language_strings "${language}" 141 mdk_attack_dependencies[@]
+	if [ -z "${enterprise_mode}" ] && [ "${et_mode}" = "et_captive_portal" ]; then
+		language_strings "${language}" 803 deauther_attack_dependencies[@]
+	fi
 	print_hint
 
 	read -rp "> " et_dos_option
@@ -15997,6 +16345,15 @@ function et_dos_menu() {
 
 				if ! dos_pursuit_mode_et_handler; then
 					return
+				fi
+
+				if [[ "${et_mode}" = "et_captive_portal" ]] && [[ -z "${enterprise_mode}" ]]; then
+					echo
+					language_strings "${language}" 316 "yellow"
+					language_strings "${language}" 115 "read"
+					if ! explore_for_targets_option "WPA"; then
+						return
+					fi
 				fi
 
 				if [[ "${et_mode}" = "et_captive_portal" ]] || [[ -n "${enterprise_mode}" ]]; then
@@ -16023,6 +16380,15 @@ function et_dos_menu() {
 					return
 				fi
 
+				if [[ "${et_mode}" = "et_captive_portal" ]] && [[ -z "${enterprise_mode}" ]]; then
+					echo
+					language_strings "${language}" 316 "yellow"
+					language_strings "${language}" 115 "read"
+					if ! explore_for_targets_option "WPA"; then
+						return
+					fi
+				fi
+
 				if [[ "${et_mode}" = "et_captive_portal" ]] || [[ -n "${enterprise_mode}" ]]; then
 					et_prerequisites
 				else
@@ -16047,6 +16413,15 @@ function et_dos_menu() {
 					return
 				fi
 
+				if [[ "${et_mode}" = "et_captive_portal" ]] && [[ -z "${enterprise_mode}" ]]; then
+					echo
+					language_strings "${language}" 316 "yellow"
+					language_strings "${language}" 115 "read"
+					if ! explore_for_targets_option "WPA"; then
+						return
+					fi
+				fi
+
 				if [[ "${et_mode}" = "et_captive_portal" ]] || [[ -n "${enterprise_mode}" ]]; then
 					et_prerequisites
 				else
@@ -16054,6 +16429,36 @@ function et_dos_menu() {
 						et_prerequisites
 					else
 						return
+					fi
+				fi
+			fi
+		;;
+		4)
+			if contains_element "${et_dos_option}" "${forbidden_options[@]}"; then
+				forbidden_menu_option
+			else
+				if [ -n "${enterprise_mode}" ] || [ "${et_mode}" != "et_captive_portal" ]; then
+					invalid_menu_option
+				else
+					et_dos_attack="Deauther"
+					dos_pursuit_mode=0
+
+					echo
+					language_strings "${language}" 316 "yellow"
+					language_strings "${language}" 115 "read"
+					if ! explore_for_targets_option "WPA" "" "secondary"; then
+						return
+					fi
+
+					if [ -z "${secondary_bssid}" ]; then
+						echo
+						language_strings "${language}" 808 "red"
+						language_strings "${language}" 115 "read"
+					else
+						if ! select_deauther_interfaces; then
+							return
+						fi
+						et_prerequisites
 					fi
 				fi
 			fi
@@ -17987,6 +18392,14 @@ function set_windows_sizes() {
 	g5_left7="${xwindow}x${ywindowseventh}+0+${seventh_of_seven_position}"
 	g5_topright_window="${xwindow}x${ywindowhalf}-0+0"
 	g5_bottomright_window="${xwindow}x${ywindowhalf}-0-0"
+
+	g6_left1="${xwindow}x${ywindowquarter}+0+0"
+	g6_left2="${xwindow}x${ywindowquarter}+0+${second_of_four_position}"
+	g6_left3="${xwindow}x${ywindowquarter}+0+${third_of_four_position}"
+	g6_left4="${xwindow}x${ywindowquarter}+0+${fourth_of_four_position}"
+	g6_right1="${xwindow}x${ywindowthird}-0+0"
+	g6_right2="${xwindow}x${ywindowthird}-0+${second_of_three_position}"
+	g6_right3="${xwindow}x${ywindowthird}-0-0"
 }
 
 #Set sizes for x-axis
@@ -18025,6 +18438,7 @@ function set_ysizes() {
 
 	ywindowone=$((ytotal - ywindow_edge_lines))
 	ywindowhalf=$((ytotal / 2 - ywindow_edge_lines))
+	ywindowquarter=$((ytotal / 4 - ywindow_edge_lines))
 	ywindowthird=$((ytotal / 3 - ywindow_edge_lines))
 	ywindowseventh=$((ytotal / 7 - ywindow_edge_lines))
 }
@@ -18035,6 +18449,10 @@ function set_ypositions() {
 	debug_print
 
 	second_of_three_position=$((resolution_y / 3 + ywindow_edge_pixels))
+
+	second_of_four_position=$((resolution_y / 4 + ywindow_edge_pixels))
+	third_of_four_position=$((resolution_y / 4 + resolution_y / 4 + ywindow_edge_pixels))
+	fourth_of_four_position=$((resolution_y / 4 + 2 * (resolution_y / 4) + ywindow_edge_pixels))
 
 	second_of_seven_position=$((resolution_y / 7 + ywindow_edge_pixels))
 	third_of_seven_position=$((resolution_y / 7 + resolution_y / 7 + ywindow_edge_pixels))
